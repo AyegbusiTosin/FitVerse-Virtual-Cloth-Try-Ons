@@ -4,9 +4,7 @@ FitVerse — Backend API Entry Point
 Responsibilities:
 1. Manage MediaPipe PoseLandmarker lifecycle.
 2. Serve shopper-facing pose measurement extraction (/api/extract-measurements).
-3. Serve shopper-facing size recommendations (/api/recommend-size) backed by
-   PostgreSQL garment data without exposing internal diagnostic metrics.
-4. Mount merchant product management and diagnostic routes.
+3. Mount shopper catalog/try-on routes and merchant management routes.
 
 Run locally with:
     uvicorn main:app --reload
@@ -19,26 +17,14 @@ from pathlib import Path
 import cv2
 import mediapipe as mp
 import numpy as np
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-from sqlalchemy.orm import Session
 
-from cloth_data import SAMPLE_HOODIE
-from database import get_db
-from recommendation import recommend_size
-from repositories.product_repo import (
-    get_product_by_id,
-    to_recommendation_garment_dict,
-)
 from routers.merchants import router as merchants_router
-from schemas import (
-    ShopperRecommendationResponse,
-    SizeRecommendationRequest,
-    build_shopper_response,
-)
+from routers.shopper import router as shopper_router
 
 
 # ============================================================
@@ -105,6 +91,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(shopper_router)
 app.include_router(merchants_router)
 
 
@@ -214,10 +201,10 @@ def calculate_shoulder_width(
 
 
 # ============================================================
-# 5. SHOPPER-FACING API ENDPOINTS
+# 5. POSE MEASUREMENT ENDPOINT
 # ============================================================
 
-@app.post(API_ROUTE, tags=["Shopper Sizing & Pose"])
+@app.post(API_ROUTE, tags=["Shopper Catalog & Virtual Try-On"])
 async def extract_measurements(
     height_inches: float = Form(..., gt=0),
     file: UploadFile = File(...),
@@ -253,59 +240,6 @@ async def extract_measurements(
             "uploaded image. Image bytes are processed in memory."
         ),
     }
-
-
-@app.post(
-    "/api/recommend-size",
-    response_model=ShopperRecommendationResponse,
-    tags=["Shopper Sizing & Pose"],
-)
-def get_size_recommendation(
-    request: SizeRecommendationRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Recommend a garment size for a shopper (and return avatar fit zones)
-    without exposing internal scoring or merchant diagnostics.
-    """
-    if request.product_id is not None:
-        product = get_product_by_id(db, request.product_id)
-        if not product:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Product with id {request.product_id} not found.",
-            )
-
-        garment_dict = to_recommendation_garment_dict(product, only_available=True)
-
-        if not garment_dict["sizes"]:
-            return ShopperRecommendationResponse(
-                status="out_of_stock",
-                product_sku=garment_dict["product_id"],
-                product_name=garment_dict["product_name"],
-                data_status=garment_dict["data_status"],
-                fit_preference=request.fit_preference,
-                recommended_size=None,
-                other_acceptable_sizes=[],
-                avatar_fit_zones=None,
-                shopper_message="All sizes for this garment are currently out of stock.",
-            )
-    else:
-        garment_dict = SAMPLE_HOODIE
-
-    try:
-        raw_result = recommend_size(
-            body=request.body.model_dump(),
-            garment_data=garment_dict,
-            fit_preference=request.fit_preference,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        ) from exc
-
-    return build_shopper_response(raw_result)
 
 
 # ============================================================

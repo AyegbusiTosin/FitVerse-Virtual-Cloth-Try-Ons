@@ -314,3 +314,46 @@ class ProductRead(BaseModel):
     sizes: list[ProductSizeRead]
 
     model_config = {"from_attributes": True}
+
+
+# ============================================================
+# 6. PUBLIC STOREFRONT CATALOG & MULTI-GARMENT TRY-ON SCHEMAS
+# ============================================================
+
+class CatalogProductRead(BaseModel):
+    """
+    Shopper-safe product representation for the React virtual try-on UI.
+    Exposes visual assets and available size labels without leaking
+    exact merchant inventory counts or raw garment size matrices.
+    """
+
+    id: int
+    merchant_id: int
+    external_sku: str
+    name: str
+    category: str
+    data_status: str
+    thumbnail_url: str | None
+    model_asset_url: str | None
+    available_sizes: list[str]
+
+
+class OutfitItemRequest(BaseModel):
+    product_id: int = Field(gt=0)
+    fit_preference: Literal["regular", "relaxed", "oversized"] = "relaxed"
+
+
+class OutfitTryOnRequest(BaseModel):
+    """
+    Evaluate multiple layered garments ('My Look') against a single
+    shopper body profile for the 3D avatar try-on experience.
+    """
+
+    body: BodyProfile
+    items: list[OutfitItemRequest] = Field(min_length=1, max_length=5)
+
+
+class OutfitTryOnResponse(BaseModel):
+    status: Literal["success"] = "success"
+    total_items: int
+    recommendations: list[ShopperRecommendationResponse]

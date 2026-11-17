@@ -185,6 +185,29 @@ def upsert_product_size(
     db.refresh(target)
     return target
 
+def list_active_catalog_products(
+    db: Session,
+    category: str | None = None,
+    merchant_id: int | None = None,
+) -> list[Product]:
+    """
+    Fetch active products for the public storefront catalog, optionally
+    filtered by garment category or merchant_id.
+    """
+    stmt = (
+        select(Product)
+        .options(selectinload(Product.sizes))
+        .where(Product.is_active.is_(True))
+        .order_by(Product.id.asc())
+    )
+
+    if merchant_id is not None:
+        stmt = stmt.where(Product.merchant_id == merchant_id)
+
+    if category is not None:
+        stmt = stmt.where(Product.category == category.strip().lower())
+
+    return list(db.scalars(stmt).all())
 
 # ============================================================
 # 3. ENGINE ADAPTER (ORM -> recommendation.py Contract)

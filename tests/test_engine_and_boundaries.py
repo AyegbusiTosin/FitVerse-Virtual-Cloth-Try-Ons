@@ -290,3 +290,117 @@ def test_merchant_crud_and_diagnostic_workflow(client, standard_body):
     assert diag_data["recommended_size"] == "L"
     assert diag_data["fit_details"]["chest_ease"] == 6.0
     assert diag_data["fit_details"]["score"] == 0.0
+
+
+def test_storefront_catalog_hides_merchant_stock_counts_and_matrices(client):
+    # Create merchant and product with one in-stock size and one out-of-stock size
+    m_res = client.post(
+        "/api/merchants",
+        json={"name": "Lagos Streetwear", "email": "ops@lagosstreetwear.ng"},
+    )
+    merchant_id = m_res.json()["id"]
+
+    client.post(
+        f"/api/merchants/{merchant_id}/products",
+        json={
+            "external_sku": "lsw-hoodie-01",
+            "name": "Eko Heavyweight Hoodie",
+            "category": "hoodie",
+            "data_status": "VERIFIED",
+            "thumbnail_url": "https://cdn.fitverse.ng/hoodie-thumb.png",
+            "model_asset_url": "https://cdn.fitverse.ng/hoodie-3d.glb",
+            "sizes": [
+                {
+                    "size_label": "M",
+                    "chest_circumference": 42.0,
+                    "shoulder_width": 19.0,
+                    "body_length": 27.0,
+                    "sleeve_length": 24.5,
+                    "stock_quantity": 0,  # Out of stock
+                },
+                {
+                    "size_label": "L",
+                    "chest_circumference": 44.0,
+                    "shoulder_width": 20.0,
+                    "body_length": 28.0,
+                    "sleeve_length": 25.0,
+                    "stock_quantity": 12,
+                },
+            ],
+        },
+    )
+
+    cat_res = client.get("/api/catalog/products?category=hoodie")
+    assert cat_res.status_code == 200
+    items = cat_res.json()
+    assert len(items) == 1
+    assert items[0]["available_sizes"] == ["L"]
+    assert items[0]["model_asset_url"] == "https://cdn.fitverse.ng/hoodie-3d.glb"
+    # Ensure internal size matrices and exact stock counts are not leaked
+    assert "sizes" not in items[0]
+    assert "stock_quantity" not in items[0]
+
+
+def test_multi_garment_outfit_try_on_endpoint(client, standard_body):
+    m_res = client.post(
+        "/api/merchants",
+        json={"name": "VI Bespoke", "email": "hello@vibespokeng.com"},
+    )
+    merchant_id = m_res.json()["id"]
+
+    p1 = client.post(
+        f"/api/merchants/{merchant_id}/products",
+        json={
+            "external_sku": "vi-polo-01",
+            "name": "Emerald Knit Polo",
+            "category": "polo",
+            "data_status": "VERIFIED",
+            "sizes": [
+                {
+                    "size_label": "L",
+                    "chest_circumference": 42.0,
+                    "shoulder_width": 19.0,
+                    "body_length": 28.0,
+                    "sleeve_length": 25.0,
+                    "stock_quantity": 5,
+                }
+            ],
+        },
+    ).json()
+
+    p2 = client.post(
+        f"/api/merchants/{merchant_id}/products",
+        json={
+            "external_sku": "vi-blazer-01",
+            "name": "Camel Linen Blazer",
+            "category": "blazer",
+            "data_status": "VERIFIED",
+            "sizes": [
+                {
+                    "size_label": "L",
+                    "chest_circumference": 44.0,
+                    "shoulder_width": 20.0,
+                    "body_length": 28.0,
+                    "sleeve_length": 25.0,
+                    "stock_quantity": 3,
+                }
+            ],
+        },
+    ).json()
+
+    look_res = client.post(
+        "/api/try-on/look",
+        json={
+            "body": standard_body,
+            "items": [
+                {"product_id": p1["id"], "fit_preference": "regular"},
+                {"product_id": p2["id"], "fit_preference": "relaxed"},
+            ],
+        },
+    )
+    assert look_res.status_code == 200
+    payload = look_res.json()
+    assert payload["total_items"] == 2
+    assert payload["recommendations"][0]["recommended_size"] == "L"
+    assert payload["recommendations"][0]["avatar_fit_zones"]["chest"] == "true_to_size"
+    assert payload["recommendations"][1]["avatar_fit_zones"]["chest"] == "relaxed"
