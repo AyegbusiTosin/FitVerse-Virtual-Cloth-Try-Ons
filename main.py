@@ -3,14 +3,13 @@ FitVerse — Backend API Entry Point
 
 Responsibilities:
 1. Manage MediaPipe PoseLandmarker lifecycle.
-2. Serve shopper-facing pose measurement extraction (/api/extract-measurements).
-3. Mount shopper catalog/try-on routes and merchant management routes.
+2. Serve shopper-facing pose-to-mannequin extraction (/api/extract-measurements).
+3. Mount shopper catalog/try-on/profile routes and merchant management routes.
 
 Run locally with:
     uvicorn main:app --reload
 """
 
-import math
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -23,8 +22,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
+from pose_estimator import estimate_mannequin_from_landmarks
 from routers.merchants import router as merchants_router
 from routers.shopper import router as shopper_router
+from schemas import PoseExtractionResponse
 
 
 # ============================================================
@@ -132,7 +133,7 @@ def detect_landmarks(image: np.ndarray, pose_landmarker):
 
     if not results.pose_landmarks:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 "No human figure detected. Please stand fully "
                 "in frame with clear lighting."
@@ -142,76 +143,22 @@ def detect_landmarks(image: np.ndarray, pose_landmarker):
     return results.pose_landmarks[0]
 
 
-def get_pixel_point(
-    landmarks,
-    landmark_id,
-    image_width: int,
-    image_height: int,
-) -> tuple[float, float]:
-    """Convert a normalized MediaPipe landmark into pixel coordinates."""
-    landmark = landmarks[landmark_id]
-    return landmark.x * image_width, landmark.y * image_height
-
-
-def calculate_shoulder_width(
-    landmarks,
-    image_width: int,
-    image_height: int,
-    height_inches: float,
-) -> float:
-    """
-    Estimate shoulder width in inches using reported height as scale reference.
-    """
-    left_shoulder = get_pixel_point(
-        landmarks, vision.PoseLandmark.LEFT_SHOULDER, image_width, image_height
-    )
-    right_shoulder = get_pixel_point(
-        landmarks, vision.PoseLandmark.RIGHT_SHOULDER, image_width, image_height
-    )
-    nose = get_pixel_point(
-        landmarks, vision.PoseLandmark.NOSE, image_width, image_height
-    )
-    left_heel = get_pixel_point(
-        landmarks, vision.PoseLandmark.LEFT_HEEL, image_width, image_height
-    )
-    right_heel = get_pixel_point(
-        landmarks, vision.PoseLandmark.RIGHT_HEEL, image_width, image_height
-    )
-
-    shoulder_width_pixels = math.dist(left_shoulder, right_shoulder)
-    average_heel_y = (left_heel[1] + right_heel[1]) / 2
-    body_reference_pixels = abs(average_heel_y - nose[1])
-
-    if not math.isfinite(body_reference_pixels) or body_reference_pixels <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Unable to calculate valid body proportions.",
-        )
-
-    inches_per_pixel = height_inches / body_reference_pixels
-    shoulder_width_inches = shoulder_width_pixels * inches_per_pixel
-
-    if not math.isfinite(shoulder_width_inches) or shoulder_width_inches <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Unable to estimate a valid shoulder width.",
-        )
-
-    return shoulder_width_inches
-
-
 # ============================================================
-# 5. POSE MEASUREMENT ENDPOINT
+# 5. POSE-TO-MANNEQUIN ENDPOINT
 # ============================================================
 
-@app.post(API_ROUTE, tags=["Shopper Catalog & Virtual Try-On"])
+@app.post(
+    API_ROUTE,
+    response_model=PoseExtractionResponse,
+    tags=["Shopper Catalog & Virtual Try-On"],
+)
 async def extract_measurements(
-    height_inches: float = Form(..., gt=0),
+    height_inches: float = Form(..., ge=48.0, le=90.0),
     file: UploadFile = File(...),
 ):
     """
-    Accept an uploaded photo and height to estimate shoulder width.
-    Offloads CPU-bound pose detection to a worker threadpool.
+    Accept an uploaded photo and height to estimate full upper/lower body
+    measurements and 3D mannequin morph parameters in memory.
     """
     image = await read_image(file)
     image_height, image_width = image.shape[:2]
@@ -222,24 +169,26 @@ async def extract_measurements(
         pose_landmarker=app.state.pose_landmarker,
     )
 
-    shoulder_width = calculate_shoulder_width(
-        landmarks=landmarks,
-        image_width=image_width,
-        image_height=image_height,
-        height_inches=height_inches,
-    )
+    try:
+        estimation = estimate_mannequin_from_landmarks(
+            landmarks=landmarks,
+            image_width=image_width,
+            image_height=image_height,
+            height_inches=height_inches,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
 
-    return {
-        "status": "success",
-        "measurements": {
-            "estimated_shoulder_width_inches": round(shoulder_width, 1),
-            "user_reported_height_inches": height_inches,
-        },
-        "privacy_notice": (
-            "This endpoint does not intentionally persist the "
-            "uploaded image. Image bytes are processed in memory."
+    return PoseExtractionResponse(
+        **estimation,
+        privacy_notice=(
+            "This endpoint does not persist the uploaded image. "
+            "Image bytes are processed strictly in memory."
         ),
-    }
+    )
 
 
 # ============================================================

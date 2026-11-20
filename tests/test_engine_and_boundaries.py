@@ -658,3 +658,44 @@ def test_shopper_profile_upsert_and_save_look_lifecycle(client):
     del_res = client.delete(f"/api/shoppers/{shopper_id}/looks/{saved_look['id']}")
     assert del_res.status_code == 204
     assert client.get(f"/api/shoppers/{shopper_id}/looks").json() == []
+
+
+def test_pose_estimator_produces_valid_mannequin_body_profile_draft():
+    from types import SimpleNamespace
+    from mediapipe.tasks.python import vision
+    from pose_estimator import estimate_mannequin_from_landmarks
+    from schemas import BodyProfile
+
+    # Create mock normalized MediaPipe landmarks for a standing human figure
+    landmarks = [SimpleNamespace(x=0.5, y=0.5) for _ in range(33)]
+    landmarks[vision.PoseLandmark.NOSE] = SimpleNamespace(x=0.50, y=0.10)
+    landmarks[vision.PoseLandmark.LEFT_SHOULDER] = SimpleNamespace(x=0.60, y=0.22)
+    landmarks[vision.PoseLandmark.RIGHT_SHOULDER] = SimpleNamespace(x=0.40, y=0.22)
+    landmarks[vision.PoseLandmark.LEFT_ELBOW] = SimpleNamespace(x=0.63, y=0.36)
+    landmarks[vision.PoseLandmark.RIGHT_ELBOW] = SimpleNamespace(x=0.37, y=0.36)
+    landmarks[vision.PoseLandmark.LEFT_WRIST] = SimpleNamespace(x=0.64, y=0.49)
+    landmarks[vision.PoseLandmark.RIGHT_WRIST] = SimpleNamespace(x=0.36, y=0.49)
+    landmarks[vision.PoseLandmark.LEFT_HIP] = SimpleNamespace(x=0.57, y=0.50)
+    landmarks[vision.PoseLandmark.RIGHT_HIP] = SimpleNamespace(x=0.43, y=0.50)
+    landmarks[vision.PoseLandmark.LEFT_KNEE] = SimpleNamespace(x=0.57, y=0.70)
+    landmarks[vision.PoseLandmark.RIGHT_KNEE] = SimpleNamespace(x=0.43, y=0.70)
+    landmarks[vision.PoseLandmark.LEFT_ANKLE] = SimpleNamespace(x=0.57, y=0.90)
+    landmarks[vision.PoseLandmark.RIGHT_ANKLE] = SimpleNamespace(x=0.43, y=0.90)
+    landmarks[vision.PoseLandmark.LEFT_HEEL] = SimpleNamespace(x=0.57, y=0.92)
+    landmarks[vision.PoseLandmark.RIGHT_HEEL] = SimpleNamespace(x=0.43, y=0.92)
+
+    result = estimate_mannequin_from_landmarks(
+        landmarks=landmarks,
+        image_width=1000,
+        image_height=1000,
+        height_inches=68.0,
+    )
+
+    assert result["measurement_source"] == "ESTIMATED_FROM_PHOTO"
+    assert result["suggested_avatar_preset"] in {"slim", "athletic", "average", "curvy", "broad"}
+
+    # Prove the draft validates cleanly as a BodyProfile for the 3D mannequin
+    profile = BodyProfile(**result["body_profile_draft"])
+    assert profile.shoulder_width > 0
+    assert profile.waist_circumference is not None
+    assert profile.preferred_inseam_length is not None

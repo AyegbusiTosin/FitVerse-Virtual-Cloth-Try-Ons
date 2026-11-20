@@ -494,3 +494,28 @@ class SavedLookRead(BaseModel):
     look_name: str
     notes: str | None
     items: list[SavedLookItemRead]
+
+
+# ============================================================
+# 8. POSE-TO-MANNEQUIN EXTRACTION SCHEMAS
+# ============================================================
+
+class MannequinMorphs(BaseModel):
+    shoulder_to_hip_ratio: float
+    torso_to_leg_ratio: float
+
+
+class PoseExtractionResponse(BaseModel):
+    """
+    Returned by /api/extract-measurements so the React 3D mannequin can
+    auto-morph to the user's proportions and immediately pass
+    body_profile_draft into /api/try-on/look or /api/shoppers/{id}/profile.
+    """
+
+    status: Literal["success"] = "success"
+    measurement_source: Literal["ESTIMATED_FROM_PHOTO"] = "ESTIMATED_FROM_PHOTO"
+    user_reported_height_inches: float
+    suggested_avatar_preset: AvatarPresetType
+    mannequin_morphs: MannequinMorphs
+    body_profile_draft: BodyProfile
+    privacy_notice: str
