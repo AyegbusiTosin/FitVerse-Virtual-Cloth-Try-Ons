@@ -1,0 +1,348 @@
+:root {
+  --bg: #f8fafc;
+  --panel: #ffffff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --muted: #64748b;
+  --accent: #0f766e;
+  --accent-soft: #ccfbf1;
+  --badge-bg: #f1f5f9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.studio-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.5rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 700;
+  font-size: 1.15rem;
+}
+
+.brand-pill {
+  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.studio-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr 370px;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  flex: 1;
+}
+
+@media (max-width: 1120px) {
+  .studio-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.stage-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.stage-banner {
+  position: absolute;
+  top: 0.85rem;
+  left: 0.85rem;
+  right: 0.85rem;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  pointer-events: none;
+}
+
+.source-chip {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+.tab-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  background: var(--badge-bg);
+  padding: 0.3rem;
+  border-radius: 10px;
+}
+
+.tab-btn {
+  border: none;
+  background: transparent;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.tab-btn.active {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.preset-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.preset-chip {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  padding: 0.38rem 0.72rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.preset-chip.active {
+  background: var(--text);
+  color: #ffffff;
+  border-color: var(--text);
+}
+
+.slider-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.slider-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.slider-label strong {
+  color: var(--text);
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.section-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.upload-box {
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 12px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: #f8fafc;
+}
+
+.text-input {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.85rem;
+}
+
+.primary-btn {
+  border: none;
+  background: var(--accent);
+  color: #ffffff;
+  padding: 0.6rem 0.9rem;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.primary-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.catalog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.garment-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  transition: border-color 0.15s ease;
+}
+
+.garment-card.selected {
+  border-color: var(--accent);
+  background: #f0fdfa;
+}
+
+.garment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.garment-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.garment-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+
+.fit-pills {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.fit-pill {
+  border: 1px solid var(--border);
+  background: #ffffff;
+  padding: 0.22rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.fit-pill.active {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+.rec-badge {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.78rem;
+}
+
+.size-pill {
+  background: var(--text);
+  color: #ffffff;
+  font-weight: 700;
+  padding: 0.18rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.78rem;
+}
+
+.zone-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+
+.zone-tag {
+  font-size: 0.7rem;
+  background: var(--badge-bg);
+  padding: 0.15rem 0.45rem;
+  border-radius: 5px;
+  color: var(--text);
+}
+
+.error-banner {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+
+.success-banner {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
