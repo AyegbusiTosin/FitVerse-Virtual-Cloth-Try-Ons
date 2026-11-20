@@ -100,7 +100,6 @@ def list_products_by_merchant(db: Session, merchant_id: int) -> list[Product]:
     )
     return list(db.scalars(stmt).all())
 
-
 def create_product_with_sizes(
     db: Session,
     merchant_id: int,
@@ -117,6 +116,7 @@ def create_product_with_sizes(
         external_sku=payload.external_sku.strip(),
         name=payload.name.strip(),
         category=payload.category.strip().lower(),
+        garment_group=payload.garment_group,
         data_status=payload.data_status,
         unit=payload.unit,
         thumbnail_url=payload.thumbnail_url,
@@ -132,6 +132,9 @@ def create_product_with_sizes(
                 shoulder_width=size_in.shoulder_width,
                 body_length=size_in.body_length,
                 sleeve_length=size_in.sleeve_length,
+                waist_circumference=size_in.waist_circumference,
+                hip_circumference=size_in.hip_circumference,
+                inseam_length=size_in.inseam_length,
                 stock_quantity=size_in.stock_quantity,
                 is_available=size_in.is_available,
             )
@@ -154,8 +157,21 @@ def upsert_product_size(
 ) -> ProductSize:
     """
     Update an existing size variant on a product, or insert a new one
-    if the size_label does not exist yet.
+    if the size_label does not exist yet. Validates measurement group match.
     """
+    if product.garment_group == "upper_body" and (
+        not size_input.has_complete_upper() or size_input.has_any_lower()
+    ):
+        raise ValueError(
+            "Upper-body products require all 4 upper measurements and no lower measurements."
+        )
+    if product.garment_group == "lower_body" and (
+        not size_input.has_complete_lower() or size_input.has_any_upper()
+    ):
+        raise ValueError(
+            "Lower-body products require all 3 lower measurements and no upper measurements."
+        )
+
     target = next(
         (s for s in product.sizes if s.size_label == size_input.size_label),
         None,
@@ -166,6 +182,9 @@ def upsert_product_size(
         target.shoulder_width = size_input.shoulder_width
         target.body_length = size_input.body_length
         target.sleeve_length = size_input.sleeve_length
+        target.waist_circumference = size_input.waist_circumference
+        target.hip_circumference = size_input.hip_circumference
+        target.inseam_length = size_input.inseam_length
         target.stock_quantity = size_input.stock_quantity
         target.is_available = size_input.is_available
     else:
@@ -176,6 +195,9 @@ def upsert_product_size(
             shoulder_width=size_input.shoulder_width,
             body_length=size_input.body_length,
             sleeve_length=size_input.sleeve_length,
+            waist_circumference=size_input.waist_circumference,
+            hip_circumference=size_input.hip_circumference,
+            inseam_length=size_input.inseam_length,
             stock_quantity=size_input.stock_quantity,
             is_available=size_input.is_available,
         )
@@ -184,6 +206,46 @@ def upsert_product_size(
     db.commit()
     db.refresh(target)
     return target
+
+
+def to_recommendation_garment_dict(
+    product: Product,
+    only_available: bool = True,
+) -> dict:
+    """
+    Adapt a SQLAlchemy Product + ProductSize collection into the exact
+    dictionary structure expected by recommendation.recommend_size() or
+    recommendation.recommend_bottom_size().
+    """
+    sizes_map: dict[str, dict[str, float]] = {}
+
+    for size in product.sizes:
+        if only_available and (not size.is_available or size.stock_quantity <= 0):
+            continue
+
+        if product.garment_group == "lower_body":
+            sizes_map[size.size_label] = {
+                "waist_circumference": size.waist_circumference,  # type: ignore[dict-item]
+                "hip_circumference": size.hip_circumference,      # type: ignore[dict-item]
+                "inseam_length": size.inseam_length,              # type: ignore[dict-item]
+            }
+        else:
+            sizes_map[size.size_label] = {
+                "chest_circumference": size.chest_circumference,  # type: ignore[dict-item]
+                "shoulder_width": size.shoulder_width,            # type: ignore[dict-item]
+                "body_length": size.body_length,                  # type: ignore[dict-item]
+                "sleeve_length": size.sleeve_length,              # type: ignore[dict-item]
+            }
+
+    return {
+        "product_id": product.external_sku,
+        "product_name": product.name,
+        "category": product.category,
+        "garment_group": product.garment_group,
+        "data_status": product.data_status,
+        "unit": product.unit,
+        "sizes": sizes_map,
+    }
 
 def list_active_catalog_products(
     db: Session,
@@ -219,11 +281,8 @@ def to_recommendation_garment_dict(
 ) -> dict:
     """
     Adapt a SQLAlchemy Product + ProductSize collection into the exact
-    dictionary structure expected by recommendation.recommend_size().
-
-    Why this adapter exists:
-    - Keeps recommendation.py completely decoupled from SQLAlchemy models.
-    - Allows filtering out-of-stock sizes before size evaluation.
+    dictionary structure expected by recommendation.recommend_size() or
+    recommendation.recommend_bottom_size().
     """
     sizes_map: dict[str, dict[str, float]] = {}
 
@@ -231,17 +290,25 @@ def to_recommendation_garment_dict(
         if only_available and (not size.is_available or size.stock_quantity <= 0):
             continue
 
-        sizes_map[size.size_label] = {
-            "chest_circumference": size.chest_circumference,
-            "shoulder_width": size.shoulder_width,
-            "body_length": size.body_length,
-            "sleeve_length": size.sleeve_length,
-        }
+        if product.garment_group == "lower_body":
+            sizes_map[size.size_label] = {
+                "waist_circumference": size.waist_circumference,  # type: ignore[dict-item]
+                "hip_circumference": size.hip_circumference,      # type: ignore[dict-item]
+                "inseam_length": size.inseam_length,              # type: ignore[dict-item]
+            }
+        else:
+            sizes_map[size.size_label] = {
+                "chest_circumference": size.chest_circumference,  # type: ignore[dict-item]
+                "shoulder_width": size.shoulder_width,            # type: ignore[dict-item]
+                "body_length": size.body_length,                  # type: ignore[dict-item]
+                "sleeve_length": size.sleeve_length,              # type: ignore[dict-item]
+            }
 
     return {
         "product_id": product.external_sku,
         "product_name": product.name,
         "category": product.category,
+        "garment_group": product.garment_group,
         "data_status": product.data_status,
         "unit": product.unit,
         "sizes": sizes_map,

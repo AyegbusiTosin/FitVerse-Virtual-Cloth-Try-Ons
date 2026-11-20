@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database import get_db
-from recommendation import recommend_size
+from recommendation import recommend_bottom_size, recommend_size
 from repositories.product_repo import (
     ConflictError,
     create_merchant,
@@ -132,7 +132,13 @@ def update_or_add_product_size(
             detail=f"Product with id {product_id} not found.",
         )
 
-    return upsert_product_size(db, product, payload)
+    try:
+        return upsert_product_size(db, product, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post(
@@ -163,8 +169,14 @@ def diagnose_product_fit(
         only_available=not include_out_of_stock,
     )
 
+    engine_fn = (
+        recommend_bottom_size
+        if product.garment_group == "lower_body"
+        else recommend_size
+    )
+
     try:
-        raw_result = recommend_size(
+        raw_result = engine_fn(
             body=body.model_dump(),
             garment_data=garment_dict,
             fit_preference=fit_preference,

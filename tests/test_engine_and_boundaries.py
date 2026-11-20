@@ -404,3 +404,257 @@ def test_multi_garment_outfit_try_on_endpoint(client, standard_body):
     assert payload["recommendations"][0]["recommended_size"] == "L"
     assert payload["recommendations"][0]["avatar_fit_zones"]["chest"] == "true_to_size"
     assert payload["recommendations"][1]["avatar_fit_zones"]["chest"] == "relaxed"
+
+
+def test_lower_body_trousers_sizing_and_head_to_toe_outfit(client):
+    # 1. Register merchant
+    m_res = client.post(
+        "/api/merchants",
+        json={"name": "Lekki Tailored", "email": "fit@lekkitailored.ng"},
+    )
+    assert m_res.status_code == 201
+    merchant_id = m_res.json()["id"]
+
+    # 2. Create upper-body shirt
+    shirt_res = client.post(
+        f"/api/merchants/{merchant_id}/products",
+        json={
+            "external_sku": "lk-shirt-01",
+            "name": "Lekki Crisp Poplin Shirt",
+            "category": "shirt",
+            "garment_group": "upper_body",
+            "data_status": "VERIFIED",
+            "sizes": [
+                {
+                    "size_label": "L",
+                    "chest_circumference": 42.0,
+                    "shoulder_width": 19.0,
+                    "body_length": 28.0,
+                    "sleeve_length": 25.0,
+                    "stock_quantity": 8,
+                }
+            ],
+        },
+    )
+    assert shirt_res.status_code == 201
+    shirt_id = shirt_res.json()["id"]
+
+    # 3. Create lower-body trousers
+    trouser_res = client.post(
+        f"/api/merchants/{merchant_id}/products",
+        json={
+            "external_sku": "lk-chino-01",
+            "name": "Lekki Pleated Chinos",
+            "category": "trousers",
+            "garment_group": "lower_body",
+            "data_status": "VERIFIED",
+            "sizes": [
+                {
+                    "size_label": "32",
+                    "waist_circumference": 33.0,
+                    "hip_circumference": 40.5,
+                    "inseam_length": 32.0,
+                    "stock_quantity": 6,
+                },
+                {
+                    "size_label": "34",
+                    "waist_circumference": 35.0,
+                    "hip_circumference": 42.5,
+                    "inseam_length": 32.0,
+                    "stock_quantity": 6,
+                },
+            ],
+        },
+    )
+    assert trouser_res.status_code == 201
+    trouser_id = trouser_res.json()["id"]
+
+    # 4. Evaluate head-to-toe outfit (shirt + trousers)
+    full_body = {
+        "chest_circumference": 38.0,
+        "shoulder_width": 18.0,
+        "preferred_body_length": 28.0,
+        "preferred_sleeve_length": 25.0,
+        "waist_circumference": 32.0,
+        "hip_circumference": 38.0,
+        "preferred_inseam_length": 32.0,
+    }
+
+    look_res = client.post(
+        "/api/try-on/look",
+        json={
+            "body": full_body,
+            "items": [
+                {"product_id": shirt_id, "fit_preference": "regular"},
+                {"product_id": trouser_id, "fit_preference": "regular"},
+            ],
+        },
+    )
+    assert look_res.status_code == 200
+    data = look_res.json()
+    assert data["total_items"] == 2
+
+    # Shirt recommendation (upper_body)
+    shirt_rec = data["recommendations"][0]
+    assert shirt_rec["garment_group"] == "upper_body"
+    assert shirt_rec["recommended_size"] == "L"
+    assert "waist" not in shirt_rec["avatar_fit_zones"]
+
+    # Trouser recommendation (lower_body)
+    trouser_rec = data["recommendations"][1]
+    assert trouser_rec["garment_group"] == "lower_body"
+    assert trouser_rec["recommended_size"] == "32"
+    assert trouser_rec["avatar_fit_zones"] == {
+        "waist": "true_to_size",
+        "hips": "true_to_size",
+        "inseam": "standard",
+    }
+
+
+def test_lower_body_garment_rejects_missing_waist_hip_inseam_with_422(client):
+    m_res = client.post(
+        "/api/merchants",
+        json={"name": "Yaba Denim", "email": "denim@yabadenim.ng"},
+    )
+    merchant_id = m_res.json()["id"]
+
+    trouser_res = client.post(
+        f"/api/merchants/{merchant_id}/products",
+        json={
+            "external_sku": "yb-jean-01",
+            "name": "Yaba Selvedge Jeans",
+            "category": "jeans",
+            "garment_group": "lower_body",
+            "data_status": "VERIFIED",
+            "sizes": [
+                {
+                    "size_label": "32",
+                    "waist_circumference": 33.0,
+                    "hip_circumference": 40.5,
+                    "inseam_length": 32.0,
+                    "stock_quantity": 4,
+                }
+            ],
+        },
+    )
+    trouser_id = trouser_res.json()["id"]
+
+    # Upper-body-only profile missing waist, hip, and inseam
+    upper_only_body = {
+        "chest_circumference": 38.0,
+        "shoulder_width": 18.0,
+        "preferred_body_length": 28.0,
+        "preferred_sleeve_length": 25.0,
+    }
+
+    res = client.post(
+        "/api/recommend-size",
+        json={"product_id": trouser_id, "body": upper_only_body, "fit_preference": "regular"},
+    )
+    assert res.status_code == 422
+
+
+def test_shopper_profile_upsert_and_save_look_lifecycle(client):
+    # 1. Create merchant + upper-body shirt + lower-body trousers
+    m_res = client.post(
+        "/api/merchants",
+        json={"name": "Ikoyi Atelier", "email": "studio@ikoyiatelier.ng"},
+    )
+    merchant_id = m_res.json()["id"]
+
+    shirt = client.post(
+        f"/api/merchants/{merchant_id}/products",
+        json={
+            "external_sku": "ik-polo-01",
+            "name": "Ikoyi Silk-Cotton Polo",
+            "category": "polo",
+            "garment_group": "upper_body",
+            "data_status": "VERIFIED",
+            "model_asset_url": "https://cdn.fitverse.ng/ik-polo.glb",
+            "sizes": [
+                {
+                    "size_label": "L",
+                    "chest_circumference": 42.0,
+                    "shoulder_width": 19.0,
+                    "body_length": 28.0,
+                    "sleeve_length": 25.0,
+                    "stock_quantity": 5,
+                }
+            ],
+        },
+    ).json()
+
+    trousers = client.post(
+        f"/api/merchants/{merchant_id}/products",
+        json={
+            "external_sku": "ik-trouser-01",
+            "name": "Ikoyi Tailored Trousers",
+            "category": "trousers",
+            "garment_group": "lower_body",
+            "data_status": "VERIFIED",
+            "model_asset_url": "https://cdn.fitverse.ng/ik-trouser.glb",
+            "sizes": [
+                {
+                    "size_label": "32",
+                    "waist_circumference": 33.0,
+                    "hip_circumference": 40.5,
+                    "inseam_length": 32.0,
+                    "stock_quantity": 5,
+                }
+            ],
+        },
+    ).json()
+
+    # 2. Save shopper avatar profile (PUT upsert)
+    shopper_id = "amaka.lagos@example.com"
+    prof_res = client.put(
+        f"/api/shoppers/{shopper_id}/profile",
+        json={
+            "display_name": "Amaka",
+            "avatar_preset": "athletic",
+            "height_inches": 67.0,
+            "body": {
+                "chest_circumference": 38.0,
+                "shoulder_width": 18.0,
+                "preferred_body_length": 28.0,
+                "preferred_sleeve_length": 25.0,
+                "waist_circumference": 32.0,
+                "hip_circumference": 38.0,
+                "preferred_inseam_length": 32.0,
+            },
+        },
+    )
+    assert prof_res.status_code == 200
+    assert prof_res.json()["avatar_preset"] == "athletic"
+
+    # 3. Save a complete head-to-toe look
+    save_res = client.post(
+        f"/api/shoppers/{shopper_id}/looks",
+        json={
+            "look_name": "Friday Gallery Opening",
+            "notes": "Smart casual evening look",
+            "items": [
+                {"product_id": shirt["id"], "fit_preference": "regular"},
+                {"product_id": trousers["id"], "fit_preference": "regular"},
+            ],
+        },
+    )
+    assert save_res.status_code == 201
+    saved_look = save_res.json()
+    assert saved_look["look_name"] == "Friday Gallery Opening"
+    assert len(saved_look["items"]) == 2
+    assert saved_look["items"][0]["recommended_size"] == "L"
+    assert saved_look["items"][1]["recommended_size"] == "32"
+
+    # 4. Reload saved looks and verify 3D model URLs + zero leaked diagnostics
+    list_res = client.get(f"/api/shoppers/{shopper_id}/looks")
+    assert list_res.status_code == 200
+    looks = list_res.json()
+    assert len(looks) == 1
+    assert looks[0]["items"][0]["model_asset_url"] == "https://cdn.fitverse.ng/ik-polo.glb"
+    assert "score" not in looks[0]["items"][0]
+
+    # 5. Delete saved look
+    del_res = client.delete(f"/api/shoppers/{shopper_id}/looks/{saved_look['id']}")
+    assert del_res.status_code == 204
+    assert client.get(f"/api/shoppers/{shopper_id}/looks").json() == []

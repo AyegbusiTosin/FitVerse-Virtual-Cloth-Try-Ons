@@ -3,59 +3,38 @@ FitVerse — API Request & Response Schemas
 
 Enforces strict boundaries between:
 1. Public shopper-facing responses (including qualitative fit zones
-   for the React 3D mannequin/avatar UI).
+   for the React 3D mannequin/avatar UI across upper & lower body).
 2. Internal merchant-facing diagnostics and sizing analytics.
 """
 
 from typing import Literal
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ============================================================
-# 1. SHOPPER INPUT SCHEMAS (Aligned with recommendation.py bounds)
+# 1. SHOPPER INPUT SCHEMAS
 # ============================================================
 
 class BodyProfile(BaseModel):
     """
     Shopper body and garment-length preferences in inches.
-    Bounds match validate_body_profile() in recommendation.py so
-    out-of-range values fail cleanly with HTTP 422 at the API boundary.
+    Upper-body measurements are required; lower-body measurements are
+    optional unless trying on a lower-body garment (e.g., trousers).
     """
 
-    chest_circumference: float = Field(
-        ge=20.0,
-        le=80.0,
-        description="Body chest circumference in inches (20–80).",
-    )
-    shoulder_width: float = Field(
-        ge=10.0,
-        le=30.0,
-        description="Body shoulder width in inches (10–30).",
-    )
-    preferred_body_length: float = Field(
-        ge=15.0,
-        le=40.0,
-        description="Desired garment body length in inches (15–40).",
-    )
-    preferred_sleeve_length: float = Field(
-        ge=10.0,
-        le=40.0,
-        description="Desired garment sleeve length in inches (10–40).",
-    )
+    chest_circumference: float = Field(ge=20.0, le=80.0)
+    shoulder_width: float = Field(ge=10.0, le=30.0)
+    preferred_body_length: float = Field(ge=15.0, le=40.0)
+    preferred_sleeve_length: float = Field(ge=10.0, le=40.0)
+
+    # Optional lower-body measurements for trousers/bottoms
+    waist_circumference: float | None = Field(default=None, ge=20.0, le=70.0)
+    hip_circumference: float | None = Field(default=None, ge=24.0, le=80.0)
+    preferred_inseam_length: float | None = Field(default=None, ge=15.0, le=42.0)
 
 
 class SizeRecommendationRequest(BaseModel):
-    """
-    Request payload for sizing recommendation.
-    Accepts an optional product_id to evaluate a database-backed garment;
-    falls back to the unverified sample garment if omitted during testing.
-    """
-
-    product_id: int | None = Field(
-        default=None,
-        gt=0,
-        description="Database ID of the merchant product to evaluate.",
-    )
+    product_id: int | None = Field(default=None, gt=0)
     body: BodyProfile
     fit_preference: Literal["regular", "relaxed", "oversized"] = "relaxed"
 
@@ -67,25 +46,26 @@ class SizeRecommendationRequest(BaseModel):
 class AvatarFitZones(BaseModel):
     """
     Qualitative drape/fit descriptors per body zone for the React 3D avatar.
-    Translates raw ease metrics into visual cues without exposing internal
-    scoring formulas or exact ease calculations.
+    Populates upper-body zones for tops and lower-body zones for trousers.
     """
 
-    chest: Literal["snug", "true_to_size", "relaxed", "oversized"]
-    shoulders: Literal["snug", "true_to_size", "relaxed", "dropped"]
-    body_length: Literal["cropped", "standard", "long"]
-    sleeve_length: Literal["short", "standard", "long"]
+    # Upper-body zones
+    chest: Literal["snug", "true_to_size", "relaxed", "oversized"] | None = None
+    shoulders: Literal["snug", "true_to_size", "relaxed", "dropped"] | None = None
+    body_length: Literal["cropped", "standard", "long"] | None = None
+    sleeve_length: Literal["short", "standard", "long"] | None = None
+
+    # Lower-body zones
+    waist: Literal["snug", "true_to_size", "relaxed", "oversized"] | None = None
+    hips: Literal["snug", "true_to_size", "relaxed", "oversized"] | None = None
+    inseam: Literal["short", "standard", "long"] | None = None
 
 
 class ShopperRecommendationResponse(BaseModel):
-    """
-    Public API response returned to storefronts and the React avatar UI.
-    Strictly excludes internal scores, ease numbers, and merchant diagnostics.
-    """
-
     status: Literal["success", "no_matching_size", "out_of_stock"]
     product_sku: str
     product_name: str
+    garment_group: Literal["upper_body", "lower_body"] = "upper_body"
     data_status: str
     fit_preference: str
     recommended_size: str | None = None
@@ -99,14 +79,24 @@ class ShopperRecommendationResponse(BaseModel):
 # ============================================================
 
 class FitMetricsDiagnostic(BaseModel):
-    chest_ease: float
-    shoulder_ease: float
-    body_length_difference: float
-    sleeve_length_difference: float
-    chest_is_acceptable: bool
-    shoulder_is_acceptable: bool
-    body_length_is_acceptable: bool
-    sleeve_length_is_acceptable: bool
+    # Upper-body metrics (present for upper_body garments)
+    chest_ease: float | None = None
+    shoulder_ease: float | None = None
+    body_length_difference: float | None = None
+    sleeve_length_difference: float | None = None
+    chest_is_acceptable: bool | None = None
+    shoulder_is_acceptable: bool | None = None
+    body_length_is_acceptable: bool | None = None
+    sleeve_length_is_acceptable: bool | None = None
+
+    # Lower-body metrics (present for lower_body garments)
+    waist_ease: float | None = None
+    hip_ease: float | None = None
+    inseam_difference: float | None = None
+    waist_is_acceptable: bool | None = None
+    hip_is_acceptable: bool | None = None
+    inseam_is_acceptable: bool | None = None
+
     is_acceptable: bool
     score: float
 
@@ -122,14 +112,10 @@ class InvalidSizeDiagnostic(BaseModel):
 
 
 class MerchantDiagnosticResponse(BaseModel):
-    """
-    Internal merchant dashboard payload containing full ease calculations,
-    normalized ranking scores, rejected candidates, and data integrity warnings.
-    """
-
     status: Literal["success", "no_matching_size"]
     product_id: str
     product_name: str
+    garment_group: Literal["upper_body", "lower_body"] = "upper_body"
     data_status: str
     fit_preference: str
     recommended_size: str | None = None
@@ -165,6 +151,26 @@ def _classify_shoulder_ease(ease: float) -> Literal["snug", "true_to_size", "rel
     return "dropped"
 
 
+def _classify_waist_ease(ease: float) -> Literal["snug", "true_to_size", "relaxed", "oversized"]:
+    if ease < 0.5:
+        return "snug"
+    if ease <= 1.75:
+        return "true_to_size"
+    if ease <= 3.5:
+        return "relaxed"
+    return "oversized"
+
+
+def _classify_hip_ease(ease: float) -> Literal["snug", "true_to_size", "relaxed", "oversized"]:
+    if ease < 2.0:
+        return "snug"
+    if ease <= 3.75:
+        return "true_to_size"
+    if ease <= 6.5:
+        return "relaxed"
+    return "oversized"
+
+
 def _classify_length_diff(diff: float, short_label: str) -> str:
     if diff < -0.75:
         return short_label
@@ -174,17 +180,15 @@ def _classify_length_diff(diff: float, short_label: str) -> str:
 
 
 def build_shopper_response(engine_result: dict) -> ShopperRecommendationResponse:
-    """
-    Convert the raw dictionary returned by recommendation.recommend_size()
-    into a shopper-safe ShopperRecommendationResponse.
-    """
     status = engine_result["status"]
+    garment_group = engine_result.get("garment_group", "upper_body")
 
     if status != "success":
         return ShopperRecommendationResponse(
             status="no_matching_size",
             product_sku=engine_result["product_id"],
             product_name=engine_result["product_name"],
+            garment_group=garment_group,
             data_status=engine_result["data_status"],
             fit_preference=engine_result["fit_preference"],
             recommended_size=None,
@@ -201,17 +205,25 @@ def build_shopper_response(engine_result: dict) -> ShopperRecommendationResponse
     rec_size = engine_result["recommended_size"]
     pref = engine_result["fit_preference"]
 
-    zones = AvatarFitZones(
-        chest=_classify_chest_ease(fit["chest_ease"]),
-        shoulders=_classify_shoulder_ease(fit["shoulder_ease"]),
-        body_length=_classify_length_diff(fit["body_length_difference"], "cropped"),
-        sleeve_length=_classify_length_diff(fit["sleeve_length_difference"], "short"),
-    )
+    if garment_group == "lower_body":
+        zones = AvatarFitZones(
+            waist=_classify_waist_ease(fit["waist_ease"]),
+            hips=_classify_hip_ease(fit["hip_ease"]),
+            inseam=_classify_length_diff(fit["inseam_difference"], "short"),
+        )
+    else:
+        zones = AvatarFitZones(
+            chest=_classify_chest_ease(fit["chest_ease"]),
+            shoulders=_classify_shoulder_ease(fit["shoulder_ease"]),
+            body_length=_classify_length_diff(fit["body_length_difference"], "cropped"),
+            sleeve_length=_classify_length_diff(fit["sleeve_length_difference"], "short"),
+        )
 
     return ShopperRecommendationResponse(
         status="success",
         product_sku=engine_result["product_id"],
         product_name=engine_result["product_name"],
+        garment_group=garment_group,
         data_status=engine_result["data_status"],
         fit_preference=pref,
         recommended_size=rec_size,
@@ -221,6 +233,7 @@ def build_shopper_response(engine_result: dict) -> ShopperRecommendationResponse
             f"Size {rec_size} is our best match for your {pref} fit preference."
         ),
     )
+
 
 # ============================================================
 # 5. MERCHANT & PRODUCT MANAGEMENT SCHEMAS
@@ -243,17 +256,19 @@ class MerchantRead(BaseModel):
 
 
 class ProductSizeInput(BaseModel):
-    """
-    Input schema for creating or updating a single garment size variant.
-    Bounds mirror validate_garment_data() in recommendation.py and
-    PostgreSQL CHECK constraints in models.py.
-    """
-
     size_label: str = Field(min_length=1, max_length=20)
-    chest_circumference: float = Field(ge=20.0, le=100.0)
-    shoulder_width: float = Field(ge=5.0, le=40.0)
-    body_length: float = Field(ge=10.0, le=50.0)
-    sleeve_length: float = Field(ge=5.0, le=50.0)
+
+    # Upper-body measurements
+    chest_circumference: float | None = Field(default=None, ge=20.0, le=100.0)
+    shoulder_width: float | None = Field(default=None, ge=5.0, le=40.0)
+    body_length: float | None = Field(default=None, ge=10.0, le=50.0)
+    sleeve_length: float | None = Field(default=None, ge=5.0, le=50.0)
+
+    # Lower-body measurements
+    waist_circumference: float | None = Field(default=None, ge=20.0, le=80.0)
+    hip_circumference: float | None = Field(default=None, ge=24.0, le=90.0)
+    inseam_length: float | None = Field(default=None, ge=10.0, le=45.0)
+
     stock_quantity: int = Field(default=10, ge=0)
     is_available: bool = True
 
@@ -265,14 +280,59 @@ class ProductSizeInput(BaseModel):
             raise ValueError("size_label cannot be blank.")
         return cleaned
 
+    def has_complete_upper(self) -> bool:
+        return all(
+            v is not None
+            for v in (
+                self.chest_circumference,
+                self.shoulder_width,
+                self.body_length,
+                self.sleeve_length,
+            )
+        )
+
+    def has_any_upper(self) -> bool:
+        return any(
+            v is not None
+            for v in (
+                self.chest_circumference,
+                self.shoulder_width,
+                self.body_length,
+                self.sleeve_length,
+            )
+        )
+
+    def has_complete_lower(self) -> bool:
+        return all(
+            v is not None
+            for v in (
+                self.waist_circumference,
+                self.hip_circumference,
+                self.inseam_length,
+            )
+        )
+
+    def has_any_lower(self) -> bool:
+        return any(
+            v is not None
+            for v in (
+                self.waist_circumference,
+                self.hip_circumference,
+                self.inseam_length,
+            )
+        )
+
 
 class ProductSizeRead(BaseModel):
     id: int
     size_label: str
-    chest_circumference: float
-    shoulder_width: float
-    body_length: float
-    sleeve_length: float
+    chest_circumference: float | None
+    shoulder_width: float | None
+    body_length: float | None
+    sleeve_length: float | None
+    waist_circumference: float | None
+    hip_circumference: float | None
+    inseam_length: float | None
     stock_quantity: int
     is_available: bool
 
@@ -283,6 +343,7 @@ class ProductCreate(BaseModel):
     external_sku: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=2, max_length=200)
     category: str = Field(default="hoodie", min_length=2, max_length=50)
+    garment_group: Literal["upper_body", "lower_body"] = "upper_body"
     data_status: Literal["VERIFIED", "SAMPLE_NOT_VERIFIED", "PENDING_REVIEW"] = "VERIFIED"
     unit: Literal["inches", "cm"] = "inches"
     thumbnail_url: str | None = Field(default=None, max_length=500)
@@ -299,6 +360,23 @@ class ProductCreate(BaseModel):
             seen.add(item.size_label)
         return sizes
 
+    @model_validator(mode="after")
+    def validate_sizes_match_garment_group(self) -> "ProductCreate":
+        for item in self.sizes:
+            if self.garment_group == "upper_body":
+                if not item.has_complete_upper() or item.has_any_lower():
+                    raise ValueError(
+                        f"Size '{item.size_label}' for an upper_body product must include all 4 upper measurements "
+                        "(chest_circumference, shoulder_width, body_length, sleeve_length) and no lower measurements."
+                    )
+            elif self.garment_group == "lower_body":
+                if not item.has_complete_lower() or item.has_any_upper():
+                    raise ValueError(
+                        f"Size '{item.size_label}' for a lower_body product must include all 3 lower measurements "
+                        "(waist_circumference, hip_circumference, inseam_length) and no upper measurements."
+                    )
+        return self
+
 
 class ProductRead(BaseModel):
     id: int
@@ -306,6 +384,7 @@ class ProductRead(BaseModel):
     external_sku: str
     name: str
     category: str
+    garment_group: str
     data_status: str
     unit: str
     thumbnail_url: str | None
@@ -321,17 +400,12 @@ class ProductRead(BaseModel):
 # ============================================================
 
 class CatalogProductRead(BaseModel):
-    """
-    Shopper-safe product representation for the React virtual try-on UI.
-    Exposes visual assets and available size labels without leaking
-    exact merchant inventory counts or raw garment size matrices.
-    """
-
     id: int
     merchant_id: int
     external_sku: str
     name: str
     category: str
+    garment_group: str
     data_status: str
     thumbnail_url: str | None
     model_asset_url: str | None
@@ -344,11 +418,6 @@ class OutfitItemRequest(BaseModel):
 
 
 class OutfitTryOnRequest(BaseModel):
-    """
-    Evaluate multiple layered garments ('My Look') against a single
-    shopper body profile for the 3D avatar try-on experience.
-    """
-
     body: BodyProfile
     items: list[OutfitItemRequest] = Field(min_length=1, max_length=5)
 
@@ -357,3 +426,71 @@ class OutfitTryOnResponse(BaseModel):
     status: Literal["success"] = "success"
     total_items: int
     recommendations: list[ShopperRecommendationResponse]
+
+
+# ============================================================
+# 7. SHOPPER AVATAR PROFILES & SAVED LOOKS SCHEMAS
+# ============================================================
+
+AvatarPresetType = Literal["slim", "athletic", "average", "curvy", "broad"]
+
+
+class ShopperProfileUpsert(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
+    avatar_preset: AvatarPresetType = "average"
+    height_inches: float | None = Field(default=None, ge=48.0, le=90.0)
+    body: BodyProfile
+
+
+class ShopperProfileRead(BaseModel):
+    id: int
+    external_shopper_id: str
+    display_name: str | None
+    avatar_preset: str
+    height_inches: float | None
+    chest_circumference: float
+    shoulder_width: float
+    preferred_body_length: float
+    preferred_sleeve_length: float
+    waist_circumference: float | None
+    hip_circumference: float | None
+    preferred_inseam_length: float | None
+
+    model_config = {"from_attributes": True}
+
+
+class SavedLookCreate(BaseModel):
+    look_name: str = Field(min_length=1, max_length=150)
+    notes: str | None = Field(default=None, max_length=500)
+    items: list[OutfitItemRequest] = Field(min_length=1, max_length=5)
+
+    @field_validator("items")
+    @classmethod
+    def ensure_unique_products(cls, items: list[OutfitItemRequest]) -> list[OutfitItemRequest]:
+        seen: set[int] = set()
+        for item in items:
+            if item.product_id in seen:
+                raise ValueError(f"Duplicate product_id {item.product_id} in saved look.")
+            seen.add(item.product_id)
+        return items
+
+
+class SavedLookItemRead(BaseModel):
+    id: int
+    product_id: int
+    product_sku: str
+    product_name: str
+    category: str
+    garment_group: str
+    thumbnail_url: str | None
+    model_asset_url: str | None
+    fit_preference: str
+    recommended_size: str
+
+
+class SavedLookRead(BaseModel):
+    id: int
+    shopper_id: int
+    look_name: str
+    notes: str | None
+    items: list[SavedLookItemRead]
